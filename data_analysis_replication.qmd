@@ -1,0 +1,682 @@
+---
+title: "Data-analysis-replication"
+author: "Lemeng"
+format: html
+---
+
+# Data analysis replication
+
+## Paper citation
+
+Lewis, R. J., Bueno, G. L., & Di Fiore, A. (2022). Variation in female leverage: The influence of kinship and market effects on the extent of female power over males in verreaux’s sifaka. *Frontiers in Ecology and Evolution*, *10*, 851880. <https://doi.org/10.3389/fevo.2022.851880>
+
+## Paper outline
+
+### Research goal
+
+The goal of the research is to examine how female economic power (leverage) in Verreaux’s sifaka varies with the value of mating opportunities. Specifically, the study tests whether indicators of mating opportunity value, such as a female’s kinship status with males, female parity status, reproductive season, and demographic aspects like the sex ratio within groups or populations, predict the extent to which females can influence male behavior during intersexual agonistic interactions.
+
+### Data sets
+
+The data used in this study was collected over more than a decade (2008–2019) in a population of Verreaux’s sifaka. Data from 2009 to 2010 was excluded in the analysis due to insufficiency caused by Cyclone Fanele. The final data incorporates approximately 14,000 hours of focal animal sampling across 10 social groups, during which detailed records of agonistic interactions were gathered, including both aggressive behaviors and submissive vocalizations. Complementing the behavioral data, monthly censuses provided demographic information such as group composition and sex ratios. Additionally, genetic analyses using 14 microsatellite markers from both fecal and tissue samples enabled precise determination of kinship among individuals.
+
+The authors provided two datasheets for public access. The first datasheet has observations of submissive chatter behavior between females and males, while the second one records each outcome of every agonistic intersexual interaction. Both datasheets include data on adult and subadult individals. The link to the repository is: <https://datadryad.org/dataset/doi:10.5061/dryad.ngf1vhhwh>
+
+### Statistical analysis
+
+The authors used a set of Bayesian generalized linear mixed models (GLMMs) to analyze the longitudinal observational data. The fixed effects are kinship (relatedness), female reproductive status (nulliparous versus parous with success or failure), reproductive season (mating versus non-mating), and sex ratios measured at both the population and group levels. Random effects for individual identities and bout IDs were incorporated to account for non-independence in repeated behavioral observations. In addition, the authors employed an HDI + ROPE approach to evaluate the practical significance of each parameter estimate. Together, these analyses allowed them to assess not only the overall influence of economic factors on female power but also how the initiator of the conflict moderates these effects.
+
+## Replication outline
+
+1.  Statistical description on submissive chatters and agonistic interaction outcomes.
+
+2.  Visualization of the outcomes of agonistic interactions in intersexual Verreaux’s sifaka dyads.
+
+3.  GLMMs on the effects of economic factors on the outcomes of agonistic interactions (male win vs. female win or neutral). There are 4 models in total.
+
+## Analysis replication
+
+### library packages
+
+```{r, message=FALSE, warning=FALSE}
+library(dplyr)
+library(tidyverse)
+library(readxl)
+library(brms)
+library(bayestestR)
+library(sjstats)
+library(Rcpp)
+library(rstanarm)
+library(broom.mixed)
+library(bayesplot)
+library(rstan)
+library(knitr)
+library(patchwork)
+```
+
+### load in data sets
+
+There are two datasheets used in the replication.
+
+Chatter: It contains the direction of submissive chatter between dyads.
+
+Win: It contains the outcomes of agonistic interactions between dyads.
+
+```{r}
+chatter <- read_xlsx("/Users/lemeng/Desktop/ADA/replication/data-analysis-replication/data/LewisEtAl2022_SubmissiveChatter_Dryad.xlsx", sheet = 2)
+head(chatter)
+## There are 1899 observations in the "chatter" datasheet.
+
+win <- read_xlsx("/Users/lemeng/Desktop/ADA/replication/data-analysis-replication/data/LewisEtAl2022_WinsData_Dryad.xlsx", sheet=1)
+head(win)
+## There are 2448 observations in the "win" datasheet.
+```
+
+### Statistical description
+
+#### 1. Summary for Chatter
+
+The summary table includes: the number of observations, number of individuals, number of adults, number of subadults, number of females (and females in both age classes), number of males (and males in both age classes), number of dyads, number of related dyads, number of unrelated dyads.
+
+```{r}
+summary_chatter <- chatter %>% 
+  summarise(n_obs = n(),
+          unique_adults = n_distinct(c(Initiator[InitiatorAgeClass == "adult"], Receiver[ReceiverAgeClass == "adult"])),
+          unique_subadults = n_distinct(c(Initiator[InitiatorAgeClass == "subadult"], Receiver[ReceiverAgeClass == "subadult"])),
+          unique_individuals = n_distinct(c(Initiator, Receiver)),
+          females_in_both_age_classes = n_distinct(
+            intersect(
+            c(Initiator[InitiatorAgeClass == "adult"&InitiatorSex == "F"], Receiver[ReceiverAgeClass == "adult"&ReceiverSex == "F"]),
+            c(Initiator[InitiatorAgeClass == "subadult"&InitiatorSex == "F"], Receiver[ReceiverAgeClass == "subadult"&ReceiverSex == "F"])
+      )),
+          males_in_both_age_classes = n_distinct(
+            intersect(
+            c(Initiator[InitiatorAgeClass == "adult"&InitiatorSex == "M"], Receiver[ReceiverAgeClass == "adult"&ReceiverSex == "M"]),
+            c(Initiator[InitiatorAgeClass == "subadult"&InitiatorSex == "M"], Receiver[ReceiverAgeClass == "subadult"&ReceiverSex == "M"])
+      )),
+          unique_females = n_distinct(c(Initiator[InitiatorSex == "F"], Receiver[ReceiverSex == "F"])),
+          unique_males = n_distinct(c(Initiator[InitiatorSex == "M"], Receiver[ReceiverSex == "M"])),
+          unique_dyads = n_distinct(paste(pmin(Initiator, Receiver), pmax(Initiator, Receiver))),
+          dyad_related = n_distinct(paste(pmin(Initiator, Receiver), pmax(Initiator, Receiver))[Relatedness == 1]),
+          dyad_unrelated = n_distinct(paste(pmin(Initiator, Receiver), pmax(Initiator, Receiver))[Relatedness == 0])
+          ) %>% 
+   pivot_longer(
+    cols = everything(),         
+    names_to = "variable",
+    values_to = "value"
+  )
+
+
+print(summary_chatter)
+```
+
+The summary for Chatter is consistent with the information in supplementary materials.
+
+#### 2. Summary for Win
+
+The summary table includes: the number of observations, number of individuals, number of adults, number of subadults, number of females (and females in both age classes), number of males (and males in both age classes), number of dyads, number of related dyads, number of unrelated dyads, number of observations when male wins, number of observations when female wins or the result is neutural.
+
+```{r}
+summary_win <- win %>% 
+  summarise(n_obs = n(),
+          unique_adults = n_distinct(c(Initiator[InitiatorAgeClass == "adult"], Receiver[ReceiverAgeClass == "adult"])),
+          unique_subadults = n_distinct(c(Initiator[InitiatorAgeClass == "subadult"], Receiver[ReceiverAgeClass == "subadult"])),
+          unique_individuals = n_distinct(c(Initiator, Receiver)),
+          females_in_both_age_classes = n_distinct(
+            intersect(
+            c(Initiator[InitiatorAgeClass == "adult"&InitiatorSex == "F"], Receiver[ReceiverAgeClass == "adult"&ReceiverSex == "F"]),
+            c(Initiator[InitiatorAgeClass == "subadult"&InitiatorSex == "F"], Receiver[ReceiverAgeClass == "subadult"&ReceiverSex == "F"])
+      )),
+          males_in_both_age_classes = n_distinct(
+            intersect(
+            c(Initiator[InitiatorAgeClass == "adult"&InitiatorSex == "M"], Receiver[ReceiverAgeClass == "adult"&ReceiverSex == "M"]),
+            c(Initiator[InitiatorAgeClass == "subadult"&InitiatorSex == "M"], Receiver[ReceiverAgeClass == "subadult"&ReceiverSex == "M"])
+      )),
+          unique_females = n_distinct(c(Initiator[InitiatorSex == "F"], Receiver[ReceiverSex == "F"])),
+          unique_males = n_distinct(c(Initiator[InitiatorSex == "M"], Receiver[ReceiverSex == "M"])),
+          unique_dyads = n_distinct(paste(pmin(Initiator, Receiver), pmax(Initiator, Receiver))),
+          dyad_related = n_distinct(paste(pmin(Initiator, Receiver), pmax(Initiator, Receiver))[Relatedness == 1]),
+          dyad_unrelated = n_distinct(paste(pmin(Initiator, Receiver), pmax(Initiator, Receiver))[Relatedness == 0]),
+          n_malewin = nrow(win %>% filter(DidMaleWinWithNeutral == "1")),
+          n_femalewin_or_neutural = nrow(win %>% filter(DidMaleWinWithNeutral == "0"))
+          ) %>% 
+   pivot_longer(
+    cols = everything(),         
+    names_to = "variable",
+    values_to = "value"
+  )
+
+
+print(summary_win)
+```
+
+The summary for Win is consistent with the information in supplementary materials.
+
+#### 3. Boxplot for outcomes of agonistic interactions in intersexual Verreaux’s sifaka dyads (for adults and subadults)
+
+```{r}
+chatter_adult <- chatter %>%
+  filter(InitiatorAgeClass=="adult" & ReceiverAgeClass=="adult") %>% 
+  filter(!is.na(Relatedness))
+
+submission_percentage <- chatter %>% 
+  group_by(FemaleID) %>%
+  summarise(
+    male_to_female_submission = sum(MaleSubmitToFemale=="1"),
+    total_chatter = n(),
+    submission_percent = (male_to_female_submission / total_chatter) * 100
+  )
+
+win_percentage <- win %>%
+  group_by(FemaleID) %>%
+  summarise(
+    female_wins = sum(DidMaleWinWithoutNeutral=="0"),
+    total_wins = n(),
+    win_percent = (female_wins / total_wins) * 100
+  )
+
+chatter_win <- full_join(submission_percentage %>% select(FemaleID, submission_percent), win_percentage %>% select(FemaleID, win_percent), by="FemaleID")
+
+chatter_win_long <- chatter_win %>%
+  select(FemaleID, submission_percent, win_percent) %>%
+  pivot_longer(cols = c(submission_percent, win_percent),
+               names_to = "label",
+               values_to = "value") %>%
+  filter(!is.na(value)) 
+
+# write labels for the plot
+chatter_win_long <- chatter_win_long %>%
+  mutate(label = case_when(
+    label == "submission_percent" ~ "Male-to-Female-Submission",
+    label == "win_percent" ~ "Female Wins"
+  ))
+  
+# create boxplot
+
+fig1 <- ggplot(chatter_win_long, aes(x = label, y = value)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(width = 0.05) +
+  theme_minimal() +
+  labs(
+    x = "",
+    y = "% of Total Intersexual Agonistic Interactions",
+    caption = "Figure 1: outcomes of agonistic interactions"
+  ) +
+  scale_y_continuous(labels = scales::percent_format(scale = 1)) +
+  scale_x_discrete(limits = c("Male-to-Female-Submission", "Female Wins"))+
+  theme(axis.text.x = element_text(size = 12),
+         plot.caption = element_text(hjust = 0.5))
+
+ggsave("images/adult&subadult_boxplot_replicated.jpg", width=6, height=5)
+knitr::include_graphics("images/adult&subadult_boxplot_replicated.jpg")
+
+```
+
+When one individual chattered submissively, males more often chattered at females (N=1,705) than females chattered at males (N=194). Percent of conflicts for which females won (N=816) out of the total agonistic iteractions (N=2448).
+
+**Compared to the boxplot including adult and subadult individials in supplementary materials (below), the boxplot I created (figure 1) has the same general trend in data, but there are also some differences:**
+
+![](images/adult&subadult_boxplotinpaper.jpg){fig-align="center" width="475"}
+
+-   For "female wins" category, there are two data points scored as 100%. However, according to my calculation, there is only one data point scored as 100%. If I exclude "outlier.shape = NA" in the plotting, I will get two data points scored as 100% too (figure 1a). Nevertheless, this doesn't explain the seemingly duplicate data points in the figure from supplementary materials.
+
+```{r}
+fig1a <- ggplot(chatter_win_long, aes(x = label, y = value)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.05) +
+  theme_minimal() +
+  labs(
+    x = "",
+    y = "% of Total Intersexual Agonistic Interactions",
+    caption = "Figure 1a: outcomes of agonistic interactions"
+  ) +
+  scale_y_continuous(labels = scales::percent_format(scale = 1)) +
+  scale_x_discrete(limits = c("Male-to-Female-Submission", "Female Wins"))+
+  theme(axis.text.x = element_text(size = 12),
+         plot.caption = element_text(hjust = 0.5))
+
+ggsave("images/adult&subadult_boxplot_replicated_a.jpg", width=6, height=5)
+knitr::include_graphics("images/adult&subadult_boxplot_replicated_a.jpg")
+
+```
+
+-   In the supplementary material, the figure legend explains "When one individual chattered submissively, males more often chattered at females (N=1,664) than females chattered at males (N=192)". The sum of them is 1856, which is different from the dataset used for this plot according to the authors. My plot sums to 1,899 chatters. From the supplementary material, I failed to find explanation for this. It is possible that some rows were filtered out because of the uncertainty in one individual's age, but this change was not included in the data for public access.
+
+### Inferential statistical analysis
+
+Models for outcomes of agonistic interactions involving adults
+
+```{r}
+
+## Select adult individuals in the dataset
+win_adult <- win %>% filter(InitiatorAgeClass == "adult"&ReceiverAgeClass == "adult")
+## There are 1850 observations in the dataset of adult individuals, which is consistent with the information provided by the authors.
+
+## Select data based on the sex of initiator
+win_adult_female <- win_adult %>% filter(InitiatorSex == "F")
+win_adult_male <- win_adult %>% filter(InitiatorSex == "M")
+```
+
+#### 1. Female-initiated agonistic interactions
+
+In the following 2 models, the response variable is whether the male won the encounter (male win vs. female win or neutral).
+
+```{r}
+## Variable type conversion for sex ratio and relatedness predictors
+win_adult_female$Relatedness <- as.factor(win_adult_female$Relatedness)
+win_adult_female$PopSexRatioFOverN_AdultsOnly <- as.numeric(win_adult_female$PopSexRatioFOverN_AdultsOnly)
+win_adult_female$GroupSexRatioFOverGroupN_AdultsOnly <- as.numeric(win_adult_female$GroupSexRatioFOverGroupN_AdultsOnly)
+```
+
+```{r}
+## **Fit bayesian model using population sex ratio
+model2a_females <- brm(formula = DidMaleWinWithNeutral  ~ Relatedness + FemaleReproductiveStatus + Season + PopSexRatioFOverN_AdultsOnly  + (1 | MaleID) + (1 | FemaleID) + (1 | BoutID),
+                        family = bernoulli(),
+                        data = win_adult_female,  
+                        chains = 4,
+                        iter = 10000,
+                        warmup = 5000,
+                        control = list(adapt_delta = 0.95))
+
+## Summarize model result
+summary(model2a_females)
+### Rhat values for all parameters all equal 1, which suggests MCMC chains have converged well.
+
+## Get odds ratio
+model2a_females_result <- as.data.frame(exp(fixef(model2a_females)))
+
+## Get percentage in ROPE value
+model2a_female_rope <- rope(model2a_females)
+model2a_female_rope$Parameter <- sub("^b_", "", model2a_female_rope$Parameter)
+
+## Combine the results for model2afemales
+model2a_females_result_rope <- cbind(model2a_females_result, ROPE = (model2a_female_rope$ROPE_Percentage)*100)
+
+print(model2a_females_result_rope)
+```
+
+```{r}
+## **Fit bayesian model using group sex ratio
+model2b_females <-  brm(formula = DidMaleWinWithNeutral  ~ Relatedness + FemaleReproductiveStatus + Season + GroupSexRatioFOverGroupN_AdultsOnly  + (1 | MaleID) + (1 | FemaleID) + (1 | BoutID),
+                        family = bernoulli(),
+                        data = win_adult_female,  
+                        chains = 4,
+                        iter = 10000,
+                        warmup = 5000,
+                        control = list(adapt_delta = 0.95))
+
+## Summarize model result
+summary(model2b_females)
+### Rhat values for all parameters all equal 1, which suggests MCMC chains have converged well.
+
+## Get odds ratio
+model2b_females_result <- as.data.frame(exp(fixef(model2b_females)))
+
+## Get percentage in ROPE value
+model2b_female_rope <- rope(model2b_females)
+model2b_female_rope$Parameter <- sub("^b_", "", model2b_female_rope$Parameter)
+
+## Combine the results for model2bfemales
+model2b_females_result_rope <- cbind(model2b_females_result, ROPE = (model2b_female_rope$ROPE_Percentage)*100)
+
+print(model2b_females_result_rope)
+```
+
+The replicated results of Model 2a are consistent with the results in the paper.
+
+![](images/table2_inpaper.png){fig-align="center" width="535"}
+
+#### 2. Male-initiated agonistic interactions
+
+In the following 2 models, the response variable is whether the male won the encounter (male win vs. female win or neutral).
+
+```{r}
+## Variable type conversion for sex ratio and relatedness predictors
+win_adult_male$Relatedness <- as.factor(win_adult_male$Relatedness)
+win_adult_male$PopSexRatioFOverN_AdultsOnly <- as.numeric(win_adult_male$PopSexRatioFOverN_AdultsOnly)
+win_adult_male$GroupSexRatioFOverGroupN_AdultsOnly <- as.numeric(win_adult_male$GroupSexRatioFOverGroupN_AdultsOnly)
+```
+
+```{r}
+## **Fit bayesian model using population sex ratio
+model2a_males <- brm(formula = DidMaleWinWithNeutral  ~ Relatedness + FemaleReproductiveStatus + Season + PopSexRatioFOverN_AdultsOnly  + (1 | MaleID) + (1 | FemaleID) + (1 | BoutID),
+                        family = bernoulli(),
+                        data = win_adult_male,  
+                        chains = 4,
+                        iter = 10000,
+                        warmup = 5000,
+                        control = list(adapt_delta = 0.95))
+
+## Summarize model result
+summary(model2a_males)
+### Rhat values for all parameters all equal 1, which suggests MCMC chains have converged well.
+
+## Get odds ratio
+model2a_males_result <- as.data.frame(exp(fixef(model2a_males)))
+
+## Get percentage in ROPE value
+model2a_male_rope <- rope(model2a_males)
+model2a_male_rope$Parameter <- sub("^b_", "", model2a_male_rope$Parameter)
+
+## Combine the results for model2amales
+model2a_males_result_rope <- cbind(model2a_males_result, ROPE =(model2a_male_rope$ROPE_Percentage)*100)
+
+print(model2a_males_result_rope)
+```
+
+```{r}
+## **Fit bayesian model using group sex ratio
+model2b_males <-  brm(formula = DidMaleWinWithNeutral  ~ Relatedness + FemaleReproductiveStatus + Season + GroupSexRatioFOverGroupN_AdultsOnly  + (1 | MaleID) + (1 | FemaleID) + (1 | BoutID),
+                        family = bernoulli(),
+                        data = win_adult_male,  
+                        chains = 4,
+                        iter = 10000,
+                        warmup = 5000,
+                        control = list(adapt_delta = 0.95))
+
+## Summarize model result
+summary(model2b_males)
+### Rhat values for all parameters all equal 1, which suggests MCMC chains have converged well.
+
+## Get odds ratio
+model2b_males_result <- as.data.frame(exp(fixef(model2b_males)))
+
+## Get percentage in ROPE value
+model2b_male_rope <- rope(model2b_males)
+model2b_male_rope$Parameter <- sub("^b_", "", model2b_male_rope$Parameter)
+
+## Combine the results for model2amales
+model2b_males_result_rope <- cbind(model2b_males_result, ROPE =(model2b_male_rope$ROPE_Percentage)*100)
+
+print(model2b_males_result_rope)
+```
+
+The replicated results of Model 2b are consistent with the results in the paper.
+
+![](images/table2_inpaper.png){fig-align="center" width="560"}
+
+#### 3. Model diagnoses
+
+3.1 Generating trace plots
+
+```{r}
+## trace plot 
+posterior_with_warmupt1 <- rstan::extract(model2a_females$fit, permuted = FALSE, inc_warmup = TRUE)
+t1 <- mcmc_trace(as.array(posterior_with_warmupt1), pars = c("b_Intercept",
+                    "b_Relatedness1",
+                    "b_FemaleReproductiveStatusParousSuccessful",
+                    "b_FemaleReproductiveStatusParousUnsuccessful",
+                    "b_PopSexRatioFOverN_AdultsOnly",
+                    "b_SeasonnonMatingSeason")) +
+  ggtitle("Trace Plots for Selected Parameters in Model2a_females") +
+  theme_minimal()
+ggsave("images/t1.jpg", width = 10, height = 10)
+
+posterior_with_warmupt2 <- rstan::extract(model2b_females$fit, permuted = FALSE, inc_warmup = TRUE)
+t2 <- mcmc_trace(as.array(posterior_with_warmupt2),
+           pars = c("b_Intercept",
+                    "b_Relatedness1",
+                    "b_FemaleReproductiveStatusParousSuccessful",
+                    "b_FemaleReproductiveStatusParousUnsuccessful",
+                    "b_GroupSexRatioFOverGroupN_AdultsOnly",
+                    "b_SeasonnonMatingSeason")) +
+  ggtitle("Trace Plots for Selected Parameters in Model2b_females") +
+  theme_minimal()
+ggsave("images/t2.jpg", width = 10, height = 10)
+
+posterior_with_warmupt3 <- rstan::extract(model2a_males$fit, permuted = FALSE, inc_warmup = TRUE)
+t3 <- mcmc_trace(as.array(posterior_with_warmupt3),
+           pars = c("b_Intercept",
+                    "b_Relatedness1",
+                    "b_FemaleReproductiveStatusParousSuccessful",
+                    "b_FemaleReproductiveStatusParousUnsuccessful",
+                    "b_PopSexRatioFOverN_AdultsOnly",
+                    "b_SeasonnonMatingSeason")) +
+  ggtitle("Trace Plots for Selected Parameters in Model2a_males") +
+  theme_minimal()
+ggsave("images/t3.jpg", width = 10, height = 10)
+
+posterior_with_warmupt4 <- rstan::extract(model2b_males$fit, permuted = FALSE, inc_warmup = TRUE)
+t4 <- mcmc_trace(as.array(posterior_with_warmupt4),
+           pars = c("b_Intercept",
+                    "b_Relatedness1",
+                    "b_FemaleReproductiveStatusParousSuccessful",
+                    "b_FemaleReproductiveStatusParousUnsuccessful",
+                    "b_GroupSexRatioFOverGroupN_AdultsOnly",
+                    "b_SeasonnonMatingSeason")) +
+  ggtitle("Trace Plots for Selected Parameters in Model2b_males") +
+  theme_minimal()
+ggsave("images/t4.jpg", width = 10, height = 10)
+
+
+```
+
+The trace plots are as follows:
+
+```{r}
+knitr::include_graphics("images/t1.jpg")
+```
+
+```{r}
+knitr::include_graphics("images/t2.jpg")
+```
+
+```{r}
+knitr::include_graphics("images/t3.jpg")
+```
+
+```{r}
+knitr::include_graphics("images/t4.jpg")
+```
+
+Combined with Rhat values above, these trace plots suggest the chained converged well.
+
+3.2 Identifying potentially important predictors in the model ("% in ROPE" value \< 10%)
+
+```{r}
+model2a_females_result_rope <- model2a_females_result_rope %>% mutate(important = case_when(
+  ROPE < 10 ~ "yes",
+  ROPE >= 10 ~ "no"))
+model2a_females_result_rope %>% select(important)
+
+model2b_females_result_rope <- model2b_females_result_rope %>% mutate(important = case_when(
+  ROPE < 10 ~ "yes",
+  ROPE >= 10 ~ "no"))
+model2b_females_result_rope %>% select(important)
+
+model2a_males_result_rope <- model2a_males_result_rope %>% mutate(important = case_when(
+  ROPE < 10 ~ "yes",
+  ROPE >= 10 ~ "no"))
+model2a_males_result_rope %>% select(important)
+
+model2b_males_result_rope <- model2b_males_result_rope %>% mutate(important = case_when(
+  ROPE < 10 ~ "yes",
+  ROPE >= 10 ~ "no"))
+model2b_males_result_rope %>% select(important)
+```
+
+The predictors that are *not* potentially important are Season in model 2a (female-initiated) and model 2b (female-initiated). Other predictors are all potentially important. These results are consistent with the findings in the paper.
+
+#### 4. Probability predicting
+
+```{r}
+## for models using population sex ratio (model 2a)
+### plots for female initated interactions
+ce <- conditional_effects(model2a_females, 
+                          effects = c("Relatedness", 
+                                      "FemaleReproductiveStatus",
+                                      "Season", 
+                                 "PopSexRatioFOverN_AdultsOnly"),
+                          method = "fitted") 
+
+plotA <- plot(ce, plot = FALSE)[["Relatedness"]] +
+  ggtitle("A") +
+  labs(y = "Predicted Probability of\n Male Winning Resource\n When Female Initiates", x = "Relatedness") +
+  scale_x_discrete(labels = c("Unrelated", "Related"))+
+  scale_y_continuous(limits = c(0, 1), labels = scales::percent)+
+  theme_minimal()
+
+plotB <- plot(ce, plot = FALSE)[["FemaleReproductiveStatus"]] +
+  ggtitle("B") +
+  labs(x = "Female Parity", y = "") +
+  scale_x_discrete(limits = c("Nulliparous", "ParousUnsuccessful", "ParousSuccessful"), labels = c("Nulliparous", "Parous\nUnsuccessful", "Parous\nSuccessful")) +
+  scale_y_continuous(limits = c(0, 1), labels = scales::percent)+
+  theme_minimal()
+
+plotC <- plot(ce, plot = FALSE)[["Season"]] +
+  ggtitle("C") +
+  labs(y = "", x = "Season") +
+  scale_x_discrete(labels = c("Mating Season", "Non-Mating Season"))+
+  scale_y_continuous(limits = c(0, 1), labels = scales::percent)+
+  theme_minimal()+
+  theme(panel.background = element_rect(fill = "gray"))
+
+plotD <- plot(ce, plot = FALSE)[["PopSexRatioFOverN_AdultsOnly"]] +
+  ggtitle("D") +
+  labs(y = "", x = "Population Sex Ratio") +
+  scale_y_continuous(limits = c(0, 1), labels = scales::percent)+
+  theme_minimal()
+
+### plots for male initated interactions
+ce2 <- conditional_effects(model2a_males, 
+                          effects = c("Relatedness", 
+                                      "FemaleReproductiveStatus",
+                                      "Season", 
+                                 "PopSexRatioFOverN_AdultsOnly"),
+                          method = "fitted") 
+
+plotE <- plot(ce2, plot = FALSE)[["Relatedness"]] +
+  ggtitle("E") +
+  labs(y = "Predicted Probability of\n Male Winning Resource\n When Male Initiates", x = "Relatedness") +
+  scale_x_discrete(labels = c("Unrelated", "Related"))+
+  scale_y_continuous(limits = c(0, 1), labels = scales::percent)+
+  theme_minimal()
+
+plotF <- plot(ce2, plot = FALSE)[["FemaleReproductiveStatus"]] +
+  ggtitle("F") +
+  labs(x = "Female Parity", y = "") +
+  scale_x_discrete(limits = c("Nulliparous", "ParousUnsuccessful", "ParousSuccessful"), labels = c("Nulliparous", "Parous\nUnsuccessful", "Parous\nSuccessful")) +
+  scale_y_continuous(limits = c(0, 1), labels = scales::percent)+
+  theme_minimal()
+
+plotG <- plot(ce2, plot = FALSE)[["Season"]] +
+  ggtitle("G") +
+  labs(y = "", x = "Season") +
+  scale_x_discrete(labels = c("Mating Season", "Non-Mating Season"))+
+  scale_y_continuous(limits = c(0, 1), labels = scales::percent)+
+  theme_minimal()
+
+plotH <- plot(ce2, plot = FALSE)[["PopSexRatioFOverN_AdultsOnly"]] +
+  ggtitle("H") +
+  labs(y = "", x = "Population Sex Ratio") +
+  scale_y_continuous(limits = c(0, 1), labels = scales::percent)+
+  theme_minimal()
+
+final_plot <- (plotA+plotB+plotC+plotD+plotE+plotF+plotG+plotH) +
+  plot_layout(ncol = 4, nrow = 2) +
+ plot_annotation(
+    caption = "Figure 2. Predicted probabilities from Model 2a",
+    theme = theme(plot.caption = element_text(hjust = 0.5, size = 11))
+  )
+ggsave("images/predicted_prob_replicated_2a.jpg", width = 12, height = 6 )
+
+knitr::include_graphics("images/predicted_prob_replicated_2a.jpg")
+```
+
+```{r}
+## for models using group sex ratio (model 2b)
+### plots for female initated interactions
+ce3 <- conditional_effects(model2b_females, 
+                          effects = c("Relatedness", 
+                                      "FemaleReproductiveStatus",
+                                      "Season", 
+                                 "GroupSexRatioFOverGroupN_AdultsOnly"),
+                          method = "fitted") 
+
+plotA1 <- plot(ce3, plot = FALSE)[["Relatedness"]] +
+  ggtitle("A") +
+  labs(y = "Predicted Probability of\n Male Winning Resource\n When Female Initiates", x = "Relatedness") +
+  scale_x_discrete(labels = c("Unrelated", "Related"))+
+  scale_y_continuous(limits = c(0, 1), labels = scales::percent)+
+  theme_minimal()
+
+plotB1 <- plot(ce3, plot = FALSE)[["FemaleReproductiveStatus"]] +
+  ggtitle("B") +
+  labs(x = "Female Parity", y = "") +
+  scale_x_discrete(limits = c("Nulliparous", "ParousUnsuccessful", "ParousSuccessful"), labels = c("Nulliparous", "Parous\nUnsuccessful", "Parous\nSuccessful")) +
+  scale_y_continuous(limits = c(0, 1), labels = scales::percent)+
+  theme_minimal()
+
+plotC1 <- plot(ce3, plot = FALSE)[["Season"]] +
+  ggtitle("C") +
+  labs(y = "", x = "Season") +
+  scale_x_discrete(labels = c("Mating Season", "Non-Mating Season"))+
+  scale_y_continuous(limits = c(0, 1), labels = scales::percent)+
+  theme_minimal()+
+  theme(panel.background = element_rect(fill = "gray"))
+
+plotD1 <- plot(ce3, plot = FALSE)[["GroupSexRatioFOverGroupN_AdultsOnly"]] +
+  ggtitle("D") +
+  labs(y = "", x = "Group Sex Ratio") +
+  scale_y_continuous(limits = c(0, 1), labels = scales::percent)+
+  theme_minimal()
+
+### plots for male initated interactions
+ce4 <- conditional_effects(model2b_males, 
+                          effects = c("Relatedness", 
+                                      "FemaleReproductiveStatus",
+                                      "Season", 
+                                 "GroupSexRatioFOverGroupN_AdultsOnly"),
+                          method = "fitted") 
+
+plotE1 <- plot(ce4, plot = FALSE)[["Relatedness"]] +
+  ggtitle("E") +
+  labs(y = "Predicted Probability of\n Male Winning Resource\n When Male Initiates", x = "Relatedness") +
+  scale_x_discrete(labels = c("Unrelated", "Related"))+
+  scale_y_continuous(limits = c(0, 1), labels = scales::percent)+
+  theme_minimal()
+
+plotF1 <- plot(ce4, plot = FALSE)[["FemaleReproductiveStatus"]] +
+  ggtitle("F") +
+  labs(x = "Female Parity", y = "") +
+  scale_x_discrete(limits = c("Nulliparous", "ParousUnsuccessful", "ParousSuccessful"), labels = c("Nulliparous", "Parous\nUnsuccessful", "Parous\nSuccessful")) +
+  scale_y_continuous(limits = c(0, 1), labels = scales::percent)+
+  theme_minimal()
+
+plotG1 <- plot(ce4, plot = FALSE)[["Season"]] +
+  ggtitle("G") +
+  labs(y = "", x = "Season") +
+  scale_x_discrete(labels = c("Mating Season", "Non-Mating Season"))+
+  scale_y_continuous(limits = c(0, 1), labels = scales::percent)+
+  theme_minimal()
+
+plotH1 <- plot(ce4, plot = FALSE)[["GroupSexRatioFOverGroupN_AdultsOnly"]] +
+  ggtitle("H") +
+  labs(y = "", x = "Group Sex Ratio") +
+  scale_y_continuous(limits = c(0, 1), labels = scales::percent)+
+  theme_minimal()
+
+final_plot_2 <- (plotA1+plotB1+plotC1+plotD1+plotE1+plotF1+plotG1+plotH1) +
+  plot_layout(ncol = 4, nrow = 2) +
+ plot_annotation(
+    caption = "Figure 3. Predicted probabilities from Model 2b",
+    theme = theme(plot.caption = element_text(hjust = 0.5, size = 11))
+  )
+ggsave("images/predicted_prob_replicated_2b.jpg", width = 12, height = 6 )
+knitr::include_graphics("images/predicted_prob_replicated_2b.jpg")
+
+```
+
+Figure 2 and 3 are consistent with figure 3 and 4 (below) in the paper.
+
+![](images/predicted_prob_2a_inpaper.jpg)
+
+![](images/predicted_prob_2b_inpaper.jpg)
+
+The results show that economic factors indeed influence outcomes in intersexual conflicts in Verreaux’s sifaka, but their effects depend on who initiates the conflict and on how sex ratios are measured. In the models using population-level sex ratios (Model 2a), when males initiated conflicts, increasing female supply (i.e., more female-biased sex ratios) tended to increase the odds of males winning—a finding that aligns with market theory expectations. However, for female-initiated conflicts or when using group-level sex ratios (Model 2b), these market effects were less consistent or even contrary to predictions. Additionally, female reproductive status and kinship played a role: for example, females with successful reproductive histories generally reduced the odds of male wins, while the influence of kinship varied with the conflict initiator. Reproductive season further moderated these dynamics; outside the mating season, male winning odds changed differently depending on whether males or females started the conflict, with male-initiated conflicts showing an unexpected increase in male wins during the mating season. Overall, while key economic predictors like sex ratio and female parity do affect conflict outcomes, these effects are nuanced and moderated by context, highlighting that female intersexual power in these contests is dynamic.
+
+### Discussion
+
+Overall, I have successfully replicated the general statistical description of the data and the GLMM used to investigate the =effects of economic factors on the outcomes of agonistic interactions (male win vs. female win or neutral). The information regarding data collection and method is clearly presented in the paper, which allowed me to use the same R packages to analyse the data and reached similar results. However, there are some differences between my results and the paper's. (They have been discussed in the above sections)
+
+The main challenge I have encountered is the inconsistency between data reported to be used for some analysis and the data I was able to obtain through public repository. In the paper, all analysis were performed on adult individuals, while the data for public access include adult and subadult individuals. When trying to extract adult individuals from the larger dataset, there is inconsistency in the Chatter data. I had 1433 observations in the chatter data for adults, while there were 1437 instances in the paper. I was unable to identify the missing data and was unable to replicate the models on chatter. The data on adult individuals for interaction outcomes (win) was consistent and complete.

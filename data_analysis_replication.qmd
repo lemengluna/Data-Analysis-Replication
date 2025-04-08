@@ -63,11 +63,11 @@ Chatter: It contains the direction of submissive chatter between dyads.
 Win: It contains the outcomes of agonistic interactions between dyads.
 
 ```{r}
-chatter <- read_xlsx("/Users/lemeng/Desktop/ADA/replication/data-analysis-replication/data/LewisEtAl2022_SubmissiveChatter_Dryad.xlsx", sheet = 2)
+chatter <- read_xlsx("data/LewisEtAl2022_SubmissiveChatter_Dryad.xlsx", sheet = 2)
 head(chatter)
 ## There are 1899 observations in the "chatter" datasheet.
 
-win <- read_xlsx("/Users/lemeng/Desktop/ADA/replication/data-analysis-replication/data/LewisEtAl2022_WinsData_Dryad.xlsx", sheet=1)
+win <- read_xlsx("data/LewisEtAl2022_WinsData_Dryad.xlsx", sheet=1)
 head(win)
 ## There are 2448 observations in the "win" datasheet.
 ```
